@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Multi-Event Ticket Counter</title>
+    
+    <style>
+        /* --- CSS: GRUNDDESIGN --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            text-align: center;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 400px;
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* --- CSS: FORMULARE & BUTTONS --- */
+        input[type="text"],
+        input[type="number"],
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            border-radius: 8px;
+            border: none;
+            box-sizing: border-box;
+            background-color: #2a2a2a;
+            color: white;
+            margin-bottom: 10px;
+        }
+
+        button {
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            touch-action: manipulation;
+        }
+
+        .btn-primary { background-color: #007bff; }
+        .btn-secondary { background-color: #6c757d; margin-bottom: 20px;}
+        .btn-minus { background-color: #dc3545; padding: 40px; font-size: 50px; }
+        .btn-plus { background-color: #28a745; padding: 20px; font-size: 30px; }
+        
+        .btn-event {
+            background-color: #343a40;
+            border: 1px solid #495057;
+            text-align: left;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* --- CSS: ZÄHLER --- */
+        .ticket-display {
+            font-size: 100px;
+            font-weight: bold;
+            margin: 10px 0;
+            line-height: 1;
+        }
+
+        h1, h2 { margin-bottom: 10px; }
+        hr { border-color: #333; width: 100%; margin: 20px 0; }
+    </style>
+</head>
+<body>
+
+    <!-- ANSICHT 1: Liste der aktiven Events -->
+    <div id="listView" class="container">
+        <h1>Ausgabestellen</h1>
+        <p>Wähle eine Veranstaltung:</p>
+        
+        <div id="activeEventsContainer"></div>
+
+        <hr>
+        <button class="btn-secondary" onclick="switchView('loginView')">⚙️ Settings (Ticket Office)</button>
+    </div>
+
+    <!-- ANSICHT 2: Login -->
+    <div id="loginView" class="container hidden">
+        <h1>Admin Login</h1>
+        <p>Bitte Passwort eingeben:</p>
+        <input type="password" id="adminPassword" placeholder="Passwort">
+        
+        <button class="btn-primary" onclick="checkPassword()">Einloggen</button>
+        
+        <hr>
+        <button class="btn-secondary" onclick="switchView('listView')">Zurück zur Übersicht</button>
+    </div>
+
+    <!-- ANSICHT 3: Einstellungen -->
+    <div id="settingsView" class="container hidden">
+        <h1>Neues Event freischalten</h1>
+        
+        <input type="text" id="eventNameInput" placeholder="Name der Performance">
+        <input type="number" id="eventTicketsInput" placeholder="Anzahl Zählkarten" min="0">
+        
+        <!-- HIER WURDE DER FUNKTIONSNAME AUF addNewEvent() GEÄNDERT -->
+        <button class="btn-primary" onclick="addNewEvent()">Event erstellen & Freischalten</button>
+        
+        <hr>
+        <button class="btn-secondary" onclick="switchView('listView')">Zurück zur Übersicht</button>
+    </div>
+
+    <!-- ANSICHT 4: Zähler -->
+    <div id="counterView" class="container hidden">
+        <button class="btn-secondary" onclick="switchView('listView')">← Zurück zur Übersicht</button>
+        
+        <h2 id="currentEventTitle">Event Name</h2>
+        <p style="margin:0; color:#aaaaaa;">Verfügbare Restkarten:</p>
+        
+        <div id="ticketCountDisplay" class="ticket-display">0</div>
+        
+        <button class="btn-minus" onclick="changeTickets(-1)">- 1 Karte ausgeben</button>
+        <button class="btn-plus" onclick="changeTickets(1)">+ 1 Karte zurück</button>
+    </div>
+
+    <script>
+        /* --- JAVASCRIPT: LOGIK & DATEN --- */
+
+        let events = []; 
+        let activeEventId = null; 
+
+        // --- NAVIGATION ---
+        function switchView(viewId) {
+            console.log("Wechsle zur Ansicht:", viewId); 
+            
+            document.getElementById('listView').classList.add('hidden');
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('settingsView').classList.add('hidden');
+            document.getElementById('counterView').classList.add('hidden');
+
+            document.getElementById(viewId).classList.remove('hidden');
+
+            if(viewId === 'listView') {
+                renderEventList();
+            }
+        }
+
+        // --- PASSWORT PRÜFUNG ---
+        function checkPassword() {
+            const pwInput = document.getElementById('adminPassword');
+            const password = pwInput.value;
+
+            console.log("Passwortprüfung gestartet.");
+
+            if (password === "ticket123") {
+                console.log("Passwort korrekt.");
+                pwInput.value = ""; 
+                switchView('settingsView'); 
+            } else {
+                console.warn("Falsches Passwort eingegeben.");
+                alert("Falsches Passwort!");
+            }
+        }
+
+        // --- EVENT-VERWALTUNG ---
+        
+        // HIER WURDE DER FUNKTIONSNAME AUF addNewEvent UMGEÄNDERT
+        function addNewEvent() {
+            console.log("addNewEvent() wurde geklickt."); 
+
+            const nameInput = document.getElementById('eventNameInput');
+            const ticketsInput = document.getElementById('eventTicketsInput');
+            
+            const name = nameInput.value.trim();
+            const tickets = parseInt(ticketsInput.value);
+
+            console.log("Ausgelesene Werte:", name, tickets); 
+
+            if (name === "" || isNaN(tickets) || tickets < 0) {
+                console.warn("Fehler: Felder nicht korrekt ausgefüllt."); 
+                alert("Bitte einen gültigen Namen und eine gültige Zahl eingeben.");
+                return;
+            }
+
+            const newEvent = {
+                id: Date.now(),
+                name: name,
+                tickets: tickets
+            };
+
+            events.push(newEvent);
+            console.log("Neues Event erfolgreich gespeichert:", newEvent); 
+
+            nameInput.value = "";
+            ticketsInput.value = "";
+
+            switchView('listView');
+        }
+
+        function renderEventList() {
+            const container = document.getElementById('activeEventsContainer');
+            container.innerHTML = ""; 
+
+            if (events.length === 0) {
+                container.innerHTML = "<p style='color:#777;'>Aktuell keine Events live.</p>";
+                return;
+            }
+
+            events.forEach(event => {
+                const button = document.createElement('button');
+                button.className = 'btn-event';
+                button.onclick = () => openCounter(event.id);
+                button.innerHTML = `<span>${event.name}</span> <span>🎟️ ${event.tickets}</span>`;
+                container.appendChild(button);
+            });
+        }
+
+        // --- ZÄHLER ---
+        function openCounter(id) {
+            activeEventId = id; 
+            const currentEvent = events.find(e => e.id === id);
+            document.getElementById('currentEventTitle').innerText = currentEvent.name;
+            updateCounterDisplay();
+            switchView('counterView');
+        }
+
+        function changeTickets(amount) {
+            const currentEvent = events.find(e => e.id === activeEventId);
+            if (currentEvent.tickets + amount < 0) return; 
+            
+            currentEvent.tickets += amount;
+            updateCounterDisplay();
+        }
+
+        function updateCounterDisplay() {
+            const currentEvent = events.find(e => e.id === activeEventId);
+            const displayElement = document.getElementById('ticketCountDisplay');
+            
+            displayElement.innerText = currentEvent.tickets;
+            displayElement.style.color = currentEvent.tickets === 0 ? "#dc3545" : "#ffffff";
+        }
+
+        // App-Start
+        renderEventList();
+
+    </script>
+</body>
+</html>
