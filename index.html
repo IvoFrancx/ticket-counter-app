@@ -4,117 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Multi-Event Ticket Counter</title>
-    
-    <style>
-        /* --- CSS: GRUNDDESIGN --- */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #121212;
-            color: #ffffff;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            height: 100vh;
-            text-align: center;
-        }
-
-        .container {
-            width: 90%;
-            max-width: 400px;
-            margin-top: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        /* --- CSS: FORMULARE & BUTTONS --- */
-        input[type="text"],
-        input[type="number"],
-        input[type="password"] {
-            width: 100%;
-            padding: 15px;
-            font-size: 18px;
-            border-radius: 8px;
-            border: none;
-            box-sizing: border-box;
-            background-color: #2a2a2a;
-            color: white;
-            margin-bottom: 10px;
-        }
-
-        button {
-            border: none;
-            border-radius: 12px;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-            width: 100%;
-            padding: 15px;
-            font-size: 18px;
-            touch-action: manipulation;
-        }
-
-        .btn-primary { background-color: #007bff; }
-        .btn-secondary { background-color: #6c757d; margin-bottom: 20px;}
-        .btn-minus { background-color: #dc3545; padding: 40px; font-size: 50px; }
-        .btn-plus { background-color: #28a745; padding: 20px; font-size: 30px; }
-        
-        .btn-event {
-            background-color: #343a40;
-            border: 1px solid #495057;
-            text-align: left;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* --- CSS: LISTEN-DESIGN FÜR SETTINGS --- */
-        .settings-event-item {
-            background-color: #2a2a2a;
-            border-radius: 8px;
-            padding: 10px 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .btn-delete {
-            background-color: #dc3545;
-            padding: 10px;
-            font-size: 16px;
-            width: auto;
-            margin: 0;
-            border-radius: 6px;
-        }
-
-        /* --- CSS: ZÄHLER --- */
-        .ticket-display {
-            font-size: 100px;
-            font-weight: bold;
-            margin: 10px 0;
-            line-height: 1;
-        }
-
-        h1, h2 { margin-bottom: 10px; }
-        h2 { font-size: 20px; color: #aaaaaa; }
-        hr { border-color: #333; width: 100%; margin: 20px 0; }
-        
-        #loadingSpinner {
-            color: #aaaaaa;
-            font-size: 14px;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- ANSICHT 1: Liste der aktiven Events -->
     <div id="listView" class="container">
         <h1>Ausgabestellen</h1>
         <p>Wähle eine Veranstaltung:</p>
@@ -125,7 +18,6 @@
         <button class="btn-secondary" onclick="switchView('loginView')">⚙️ Settings (Ticket Office)</button>
     </div>
 
-    <!-- ANSICHT 2: Login -->
     <div id="loginView" class="container hidden">
         <h1>Admin Login</h1>
         <p>Bitte Passwort eingeben:</p>
@@ -137,7 +29,6 @@
         <button class="btn-secondary" onclick="switchView('listView')">Zurück zur Übersicht</button>
     </div>
 
-    <!-- ANSICHT 3: Einstellungen -->
     <div id="settingsView" class="container hidden">
         <h1>Neues Event freischalten</h1>
         
@@ -148,14 +39,12 @@
         
         <hr>
         <h2>Aktive Events verwalten</h2>
-        <!-- HIER WERDEN DIE EVENTS ZUM LÖSCHEN ANGEZEIGT -->
         <div id="settingsEventsContainer"></div>
         
         <hr>
         <button class="btn-secondary" onclick="switchView('listView')">Zurück zur Übersicht</button>
     </div>
 
-    <!-- ANSICHT 4: Zähler -->
     <div id="counterView" class="container hidden">
         <button class="btn-secondary" onclick="switchView('listView')">← Zurück zur Übersicht</button>
         
@@ -170,291 +59,6 @@
         <div id="loadingSpinner" class="hidden">Synchronisiere...</div>
     </div>
 
-    <script>
-        const API_URL = 'api.php'; 
-
-        let events = []; 
-        let activeEventId = null; 
-        let pollingInterval = null;
-        let editId = -1; // Speichert, welches Event gerade bearbeitet wird (-1 bedeutet: wir erstellen ein neues)
-
-        // --- NAVIGATION ---
-        function switchView(viewId) {
-            document.getElementById('listView').classList.add('hidden');
-            document.getElementById('loginView').classList.add('hidden');
-            document.getElementById('settingsView').classList.add('hidden');
-            document.getElementById('counterView').classList.add('hidden');
-
-            document.getElementById(viewId).classList.remove('hidden');
-
-            // Wenn wir in die Settings gehen, rendern wir die Lösch-Liste
-            if (viewId === 'settingsView') {
-                renderSettingsEventList();
-            }
-
-            if (viewId === 'counterView' || viewId === 'listView') {
-                startPolling();
-            } else {
-                stopPolling();
-            }
-        }
-
-        // --- PASSWORT PRÜFUNG ---
-        function checkPassword() {
-            const pwInput = document.getElementById('adminPassword');
-            if (pwInput.value === "ticket123") {
-                pwInput.value = ""; 
-                switchView('settingsView'); 
-            } else {
-                alert("Falsches Passwort!");
-            }
-        }
-
-        // --- SERVER-KOMMUNIKATION (FETCH) ---
-
-        async function fetchEvents() {
-            try {
-                const timestamp = new Date().getTime();
-                const response = await fetch(`${API_URL}?action=getEvents&t=${timestamp}`, {
-                    cache: 'no-store' 
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    events = data.events; 
-                    
-                    if (!document.getElementById('listView').classList.contains('hidden')) {
-                        renderEventList();
-                    }
-                    if (!document.getElementById('counterView').classList.contains('hidden') && activeEventId) {
-                        updateCounterDisplay();
-                    }
-                    // Aktualisiert auch die Lösch-Liste live, falls jemand im Settings-Menü ist
-                    if (!document.getElementById('settingsView').classList.contains('hidden')) {
-                        renderSettingsEventList();
-                    }
-                }
-            } catch (error) {
-                console.error("Fehler beim Laden der Events:", error);
-            }
-        }
-
-        async function addNewEvent() {
-            const nameInput = document.getElementById('eventNameInput');
-            const ticketsInput = document.getElementById('eventTicketsInput');
-            
-            const name = nameInput.value.trim();
-            const tickets = parseInt(ticketsInput.value);
-
-            if (name === "" || isNaN(tickets) || tickets < 0) {
-                alert("Bitte einen gültigen Namen und eine gültige Zahl eingeben.");
-                return;
-            }
-
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'createEvent', name: name, tickets: tickets })
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    nameInput.value = "";
-                    ticketsInput.value = "";
-                    await fetchEvents(); 
-                } else {
-                    alert("Fehler beim Erstellen: " + data.error);
-                }
-            } catch (error) {
-                alert("Verbindungsfehler zum Server.");
-            }
-        }
-
-        // NEU: Funktion zum Löschen eines Events
-        async function deleteEvent(id) {
-            // Sicherheitsabfrage im Browser
-            if (!confirm("Möchtest du diese Veranstaltung wirklich unwiderruflich löschen?")) {
-                return; // Bricht ab, wenn der User auf "Abbrechen" klickt
-            }
-
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'deleteEvent', id: id })
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    await fetchEvents(); // Liste sofort neu laden
-                } else {
-                    alert("Fehler beim Löschen: " + data.error);
-                }
-            } catch (error) {
-                alert("Verbindungsfehler zum Server.");
-            }
-        }
-
-        async function changeTickets(amount) {
-            const currentEvent = events.find(e => e.id === activeEventId);
-            if (!currentEvent || currentEvent.tickets + amount < 0) return; 
-
-            document.getElementById('loadingSpinner').classList.remove('hidden');
-
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'updateTickets', id: activeEventId, amount: amount })
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    currentEvent.tickets = data.newTotal;
-                    updateCounterDisplay();
-                } else {
-                    console.warn(data.error);
-                    await fetchEvents(); 
-                }
-            } catch (error) {
-                console.error("Verbindungsfehler");
-            } finally {
-                document.getElementById('loadingSpinner').classList.add('hidden');
-            }
-        }
-
-        // --- HILFSFUNKTIONEN FÜR DIE OBERFLÄCHE ---
-
-        function renderEventList() {
-            const container = document.getElementById('activeEventsContainer');
-            container.innerHTML = ""; 
-
-            if (events.length === 0) {
-                container.innerHTML = "<p style='color:#777;'>Aktuell keine Events live.</p>";
-                return;
-            }
-
-            events.forEach(event => {
-                const button = document.createElement('button');
-                button.className = 'btn-event';
-                button.onclick = () => openCounter(event.id);
-                button.innerHTML = `<span>${event.name}</span> <span>🎟️ ${event.tickets}</span>`;
-                container.appendChild(button);
-            });
-        }
-
-        // NEU: Baut die Liste im Settings-Menü auf
-        function renderSettingsEventList() {
-            const container = document.getElementById('settingsEventsContainer');
-            container.innerHTML = ""; 
-
-            events.forEach(event => {
-                const div = document.createElement('div');
-                div.className = 'settings-event-item';
-                div.innerHTML = `
-                    <span style="text-align: left; flex-grow: 1;">${event.name} (🎟️ ${event.tickets})</span>
-                    <div>
-                        <button class="btn-secondary" style="padding: 10px; width: auto; margin-right: 5px;" onclick="prepareEdit(${event.id})">✏️</button>
-                        <button class="btn-delete" onclick="deleteEvent(${event.id})">🗑️</button>
-                    </div>
-                `;
-                container.appendChild(div);
-            });
-        }
-
-        // 1. Bearbeiten-Button geklickt: Daten in die Eingabefelder kopieren
-        function prepareEdit(id) {
-            const event = events.find(e => e.id === id);
-            if (!event) return;
-
-            document.getElementById('eventNameInput').value = event.name;
-            document.getElementById('eventTicketsInput').value = event.tickets;
-            
-            editId = id; // Modus auf "Bearbeiten" setzen
-            
-            // Button-Text anpassen
-            const btn = document.querySelector('#settingsView button.btn-primary');
-            btn.innerText = "Änderungen speichern";
-            btn.style.backgroundColor = "#ffc107"; // Gelb für "Bearbeitungsmodus"
-        }
-
-        // 2. Erstellen/Speichern-Logik erweitern
-        async function addNewEvent() {
-            const name = document.getElementById('eventNameInput').value.trim();
-            const tickets = parseInt(document.getElementById('eventTicketsInput').value);
-
-            if (name === "" || isNaN(tickets) || tickets < 0) {
-                alert("Bitte Felder ausfüllen.");
-                return;
-            }
-
-            // Entscheiden: Update (Bearbeiten) oder Insert (Neu)?
-            const action = (editId === -1) ? 'createEvent' : 'updateEvent';
-            const bodyData = (editId === -1) 
-                ? { action: 'createEvent', name: name, tickets: tickets }
-                : { action: 'updateEvent', id: editId, name: name, tickets: tickets };
-
-            try {
-                const response = await fetch(API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bodyData)
-                });
-                
-                const data = await response.json();
-                if (data.success) {
-                    document.getElementById('eventNameInput').value = "";
-                    document.getElementById('eventTicketsInput').value = "";
-                    
-                    // Modus zurücksetzen
-                    editId = -1;
-                    document.querySelector('#settingsView button.btn-primary').innerText = "Event erstellen & Freischalten";
-                    document.querySelector('#settingsView button.btn-primary').style.backgroundColor = "#007bff";
-                    
-                    await fetchEvents();
-                }
-            } catch (error) {
-                alert("Fehler bei der Übertragung.");
-            }
-        }
-
-        function openCounter(id) {
-            activeEventId = id; 
-            const currentEvent = events.find(e => e.id === id);
-            if(currentEvent) {
-                document.getElementById('currentEventTitle').innerText = currentEvent.name;
-                updateCounterDisplay();
-                switchView('counterView');
-            }
-        }
-
-        function updateCounterDisplay() {
-            const currentEvent = events.find(e => e.id === activeEventId);
-            if (!currentEvent) return; 
-
-            const displayElement = document.getElementById('ticketCountDisplay');
-            displayElement.innerText = currentEvent.tickets;
-            displayElement.style.color = currentEvent.tickets === 0 ? "#dc3545" : "#ffffff";
-        }
-
-        // --- POLLING ---
-        function startPolling() {
-            if (pollingInterval) clearInterval(pollingInterval);
-            pollingInterval = setInterval(fetchEvents, 3000);
-        }
-
-        function stopPolling() {
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-                pollingInterval = null;
-            }
-        }
-
-        // App-Start
-        fetchEvents();
-
-    </script>
+    <script src="script.js"></script>
 </body>
 </html>

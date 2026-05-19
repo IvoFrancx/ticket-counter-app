@@ -96,6 +96,27 @@ switch ($action) {
         }
         break;
 
+    // AKTION 5 (NEU): Bestehendes Event bearbeiten
+    case 'updateEvent':
+        $id = (int)($input['id'] ?? 0);
+        $name = $input['name'] ?? '';
+        $tickets = (int)($input['tickets'] ?? 0);
+
+        if ($id <= 0 || empty($name) || $tickets < 0) {
+            echo json_encode(['success' => false, 'error' => 'Ungültige Daten']);
+            exit;
+        }
+
+        try {
+            $stmt = $pdo->prepare("UPDATE tc_events SET name = :name, tickets = :tickets WHERE id = :id");
+            $stmt->execute(['name' => $name, 'tickets' => $tickets, 'id' => $id]);
+            
+            echo json_encode(['success' => true]);
+        } catch (PDOException $e) {
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        }
+        break;
+
     // FEHLER: Unbekannte Aktion
     default:
         echo json_encode(['success' => false, 'error' => 'Unbekannte Aktion']);
