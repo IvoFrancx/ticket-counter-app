@@ -84,6 +84,12 @@
 
         h1, h2 { margin-bottom: 10px; }
         hr { border-color: #333; width: 100%; margin: 20px 0; }
+        
+        /* Neu: Kleiner Lade-Indikator */
+        #loadingSpinner {
+            color: #aaaaaa;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -93,7 +99,7 @@
         <h1>Ausgabestellen</h1>
         <p>Wähle eine Veranstaltung:</p>
         
-        <div id="activeEventsContainer"></div>
+        <div id="activeEventsContainer">Lade Daten...</div>
 
         <hr>
         <button class="btn-secondary" onclick="switchView('loginView')">⚙️ Settings (Ticket Office)</button>
@@ -118,7 +124,6 @@
         <input type="text" id="eventNameInput" placeholder="Name der Performance">
         <input type="number" id="eventTicketsInput" placeholder="Anzahl Zählkarten" min="0">
         
-        <!-- HIER WURDE DER FUNKTIONSNAME AUF addNewEvent() GEÄNDERT -->
         <button class="btn-primary" onclick="addNewEvent()">Event erstellen & Freischalten</button>
         
         <hr>
@@ -136,18 +141,23 @@
         
         <button class="btn-minus" onclick="changeTickets(-1)">- 1 Karte ausgeben</button>
         <button class="btn-plus" onclick="changeTickets(1)">+ 1 Karte zurück</button>
+        
+        <div id="loadingSpinner" class="hidden">Synchronisiere...</div>
     </div>
 
     <script>
-        /* --- JAVASCRIPT: LOGIK & DATEN --- */
+        /* --- JAVASCRIPT: DATENBANK-LOGIK --- */
+
+        // Der Pfad zu unserer Schnittstelle. Da index.html und api.php
+        // im selben FTP-Ordner liegen, reicht der Dateiname.
+        const API_URL = 'api.php'; 
 
         let events = []; 
         let activeEventId = null; 
+        let pollingInterval = null;
 
         // --- NAVIGATION ---
         function switchView(viewId) {
-            console.log("Wechsle zur Ansicht:", viewId); 
-            
             document.getElementById('listView').classList.add('hidden');
             document.getElementById('loginView').classList.add('hidden');
             document.getElementById('settingsView').classList.add('hidden');
@@ -155,62 +165,117 @@
 
             document.getElementById(viewId).classList.remove('hidden');
 
-            if(viewId === 'listView') {
-                renderEventList();
+            // Wenn wir auf der Zähler-Seite sind, starten wir das Polling (alle 3 Sekunden)
+            if (viewId === 'counterView' || viewId === 'listView') {
+                startPolling();
+            } else {
+                stopPolling();
             }
         }
 
         // --- PASSWORT PRÜFUNG ---
         function checkPassword() {
             const pwInput = document.getElementById('adminPassword');
-            const password = pwInput.value;
-
-            console.log("Passwortprüfung gestartet.");
-
-            if (password === "ticket123") {
-                console.log("Passwort korrekt.");
+            if (pwInput.value === "ticket123") {
                 pwInput.value = ""; 
                 switchView('settingsView'); 
             } else {
-                console.warn("Falsches Passwort eingegeben.");
                 alert("Falsches Passwort!");
             }
         }
 
-        // --- EVENT-VERWALTUNG ---
-        
-        // HIER WURDE DER FUNKTIONSNAME AUF addNewEvent UMGEÄNDERT
-        function addNewEvent() {
-            console.log("addNewEvent() wurde geklickt."); 
+        // --- SERVER-KOMMUNIKATION (FETCH) ---
 
+        // 1. Alle Events vom Server holen
+        async function fetchEvents() {
+            try {
+                const response = await fetch(`${API_URL}?action=getEvents`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    events = data.events; // Lokale Liste überschreiben
+                    
+                    // Ansichten aktualisieren, ohne den Benutzer zu stören
+                    if (!document.getElementById('listView').classList.contains('hidden')) {
+                        renderEventList();
+                    }
+                    if (!document.getElementById('counterView').classList.contains('hidden') && activeEventId) {
+                        updateCounterDisplay();
+                    }
+                }
+            } catch (error) {
+                console.error("Fehler beim Laden der Events:", error);
+            }
+        }
+
+        // 2. Ein neues Event in die Datenbank schreiben
+        async function addNewEvent() {
             const nameInput = document.getElementById('eventNameInput');
             const ticketsInput = document.getElementById('eventTicketsInput');
             
             const name = nameInput.value.trim();
             const tickets = parseInt(ticketsInput.value);
 
-            console.log("Ausgelesene Werte:", name, tickets); 
-
             if (name === "" || isNaN(tickets) || tickets < 0) {
-                console.warn("Fehler: Felder nicht korrekt ausgefüllt."); 
                 alert("Bitte einen gültigen Namen und eine gültige Zahl eingeben.");
                 return;
             }
 
-            const newEvent = {
-                id: Date.now(),
-                name: name,
-                tickets: tickets
-            };
-
-            events.push(newEvent);
-            console.log("Neues Event erfolgreich gespeichert:", newEvent); 
-
-            nameInput.value = "";
-            ticketsInput.value = "";
-
-            switchView('listView');
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'createEvent', name: name, tickets: tickets })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    nameInput.value = "";
+                    ticketsInput.value = "";
+                    await fetchEvents(); // Liste sofort neu laden
+                    switchView('listView');
+                } else {
+                    alert("Fehler beim Erstellen: " + data.error);
+                }
+            } catch (error) {
+                alert("Verbindungsfehler zum Server.");
+            }
         }
+
+        // 3. Tickets in der Datenbank ändern (+1 oder -1)
+        async function changeTickets(amount) {
+            const currentEvent = events.find(e => e.id === activeEventId);
+            
+            // Verhindern, dass es lokal ins Minus geht (die Datenbank blockiert es auch)
+            if (currentEvent.tickets + amount < 0) return; 
+
+            // Ladeindikator zeigen, damit man weiß, dass etwas passiert
+            document.getElementById('loadingSpinner').classList.remove('hidden');
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'updateTickets', id: activeEventId, amount: amount })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    // Update erfolgreich: Neuen Wert vom Server übernehmen
+                    currentEvent.tickets = data.newTotal;
+                    updateCounterDisplay();
+                } else {
+                    console.warn(data.error);
+                    await fetchEvents(); // Zur Sicherheit die echten Daten neu laden
+                }
+            } catch (error) {
+                console.error("Verbindungsfehler");
+            } finally {
+                document.getElementById('loadingSpinner').classList.add('hidden');
+            }
+        }
+
+        // --- HILFSFUNKTIONEN FÜR DIE OBERFLÄCHE ---
 
         function renderEventList() {
             const container = document.getElementById('activeEventsContainer');
@@ -230,7 +295,6 @@
             });
         }
 
-        // --- ZÄHLER ---
         function openCounter(id) {
             activeEventId = id; 
             const currentEvent = events.find(e => e.id === id);
@@ -239,24 +303,32 @@
             switchView('counterView');
         }
 
-        function changeTickets(amount) {
-            const currentEvent = events.find(e => e.id === activeEventId);
-            if (currentEvent.tickets + amount < 0) return; 
-            
-            currentEvent.tickets += amount;
-            updateCounterDisplay();
-        }
-
         function updateCounterDisplay() {
             const currentEvent = events.find(e => e.id === activeEventId);
+            if (!currentEvent) return; // Sicherheitscheck, falls Event gelöscht wurde
+
             const displayElement = document.getElementById('ticketCountDisplay');
-            
             displayElement.innerText = currentEvent.tickets;
             displayElement.style.color = currentEvent.tickets === 0 ? "#dc3545" : "#ffffff";
         }
 
+        // --- POLLING (Hintergrund-Aktualisierung) ---
+        function startPolling() {
+            // Verhindern, dass mehrere Timer parallel laufen
+            if (pollingInterval) clearInterval(pollingInterval);
+            // Alle 3000 Millisekunden (3 Sekunden) die Events neu laden
+            pollingInterval = setInterval(fetchEvents, 3000);
+        }
+
+        function stopPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+        }
+
         // App-Start
-        renderEventList();
+        fetchEvents(); // Holt sofort die aktuellen Daten beim Öffnen
 
     </script>
 </body>
