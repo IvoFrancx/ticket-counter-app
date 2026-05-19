@@ -1,0 +1,28 @@
+name: FTP Deploy
+
+# Definiert, wann die Aktion ausgeführt wird
+on:
+  push:
+    branches:
+      - main # Führt den Upload nur aus, wenn in den Haupt-Branch gepusht wird
+
+jobs:
+  deploy:
+    name: Upload to FTP
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Holt den aktuellen Code aus dem Repository
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Wichtig, damit das Skript weiß, welche Dateien sich geändert haben
+
+      # 2. Verbindet sich per FTP und lädt die Dateien hoch
+      - name: Sync files to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /ticket-app/ #Das Zielverzeichnis auf deinem Server
