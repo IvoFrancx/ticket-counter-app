@@ -74,6 +74,26 @@
             align-items: center;
         }
 
+        /* --- CSS: LISTEN-DESIGN FÜR SETTINGS --- */
+        .settings-event-item {
+            background-color: #2a2a2a;
+            border-radius: 8px;
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .btn-delete {
+            background-color: #dc3545;
+            padding: 10px;
+            font-size: 16px;
+            width: auto;
+            margin: 0;
+            border-radius: 6px;
+        }
+
         /* --- CSS: ZÄHLER --- */
         .ticket-display {
             font-size: 100px;
@@ -83,9 +103,9 @@
         }
 
         h1, h2 { margin-bottom: 10px; }
+        h2 { font-size: 20px; color: #aaaaaa; }
         hr { border-color: #333; width: 100%; margin: 20px 0; }
         
-        /* Neu: Kleiner Lade-Indikator */
         #loadingSpinner {
             color: #aaaaaa;
             font-size: 14px;
@@ -127,6 +147,11 @@
         <button class="btn-primary" onclick="addNewEvent()">Event erstellen & Freischalten</button>
         
         <hr>
+        <h2>Aktive Events verwalten</h2>
+        <!-- HIER WERDEN DIE EVENTS ZUM LÖSCHEN ANGEZEIGT -->
+        <div id="settingsEventsContainer"></div>
+        
+        <hr>
         <button class="btn-secondary" onclick="switchView('listView')">Zurück zur Übersicht</button>
     </div>
 
@@ -134,7 +159,7 @@
     <div id="counterView" class="container hidden">
         <button class="btn-secondary" onclick="switchView('listView')">← Zurück zur Übersicht</button>
         
-        <h2 id="currentEventTitle">Event Name</h2>
+        <h2 id="currentEventTitle" style="color: white; font-size: 24px;">Event Name</h2>
         <p style="margin:0; color:#aaaaaa;">Verfügbare Restkarten:</p>
         
         <div id="ticketCountDisplay" class="ticket-display">0</div>
@@ -146,10 +171,6 @@
     </div>
 
     <script>
-        /* --- JAVASCRIPT: DATENBANK-LOGIK --- */
-
-        // Der Pfad zu unserer Schnittstelle. Da index.html und api.php
-        // im selben FTP-Ordner liegen, reicht der Dateiname.
         const API_URL = 'api.php'; 
 
         let events = []; 
@@ -165,7 +186,11 @@
 
             document.getElementById(viewId).classList.remove('hidden');
 
-            // Wenn wir auf der Zähler-Seite sind, starten wir das Polling (alle 3 Sekunden)
+            // Wenn wir in die Settings gehen, rendern wir die Lösch-Liste
+            if (viewId === 'settingsView') {
+                renderSettingsEventList();
+            }
+
             if (viewId === 'counterView' || viewId === 'listView') {
                 startPolling();
             } else {
@@ -186,21 +211,27 @@
 
         // --- SERVER-KOMMUNIKATION (FETCH) ---
 
-        // 1. Alle Events vom Server holen
         async function fetchEvents() {
             try {
-                const response = await fetch(`${API_URL}?action=getEvents`);
+                const timestamp = new Date().getTime();
+                const response = await fetch(`${API_URL}?action=getEvents&t=${timestamp}`, {
+                    cache: 'no-store' 
+                });
+                
                 const data = await response.json();
                 
                 if (data.success) {
-                    events = data.events; // Lokale Liste überschreiben
+                    events = data.events; 
                     
-                    // Ansichten aktualisieren, ohne den Benutzer zu stören
                     if (!document.getElementById('listView').classList.contains('hidden')) {
                         renderEventList();
                     }
                     if (!document.getElementById('counterView').classList.contains('hidden') && activeEventId) {
                         updateCounterDisplay();
+                    }
+                    // Aktualisiert auch die Lösch-Liste live, falls jemand im Settings-Menü ist
+                    if (!document.getElementById('settingsView').classList.contains('hidden')) {
+                        renderSettingsEventList();
                     }
                 }
             } catch (error) {
@@ -208,7 +239,6 @@
             }
         }
 
-        // 2. Ein neues Event in die Datenbank schreiben
         async function addNewEvent() {
             const nameInput = document.getElementById('eventNameInput');
             const ticketsInput = document.getElementById('eventTicketsInput');
@@ -232,8 +262,7 @@
                 if (data.success) {
                     nameInput.value = "";
                     ticketsInput.value = "";
-                    await fetchEvents(); // Liste sofort neu laden
-                    switchView('listView');
+                    await fetchEvents(); 
                 } else {
                     alert("Fehler beim Erstellen: " + data.error);
                 }
@@ -242,14 +271,35 @@
             }
         }
 
-        // 3. Tickets in der Datenbank ändern (+1 oder -1)
+        // NEU: Funktion zum Löschen eines Events
+        async function deleteEvent(id) {
+            // Sicherheitsabfrage im Browser
+            if (!confirm("Möchtest du diese Veranstaltung wirklich unwiderruflich löschen?")) {
+                return; // Bricht ab, wenn der User auf "Abbrechen" klickt
+            }
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'deleteEvent', id: id })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    await fetchEvents(); // Liste sofort neu laden
+                } else {
+                    alert("Fehler beim Löschen: " + data.error);
+                }
+            } catch (error) {
+                alert("Verbindungsfehler zum Server.");
+            }
+        }
+
         async function changeTickets(amount) {
             const currentEvent = events.find(e => e.id === activeEventId);
-            
-            // Verhindern, dass es lokal ins Minus geht (die Datenbank blockiert es auch)
-            if (currentEvent.tickets + amount < 0) return; 
+            if (!currentEvent || currentEvent.tickets + amount < 0) return; 
 
-            // Ladeindikator zeigen, damit man weiß, dass etwas passiert
             document.getElementById('loadingSpinner').classList.remove('hidden');
 
             try {
@@ -261,12 +311,11 @@
                 
                 const data = await response.json();
                 if (data.success) {
-                    // Update erfolgreich: Neuen Wert vom Server übernehmen
                     currentEvent.tickets = data.newTotal;
                     updateCounterDisplay();
                 } else {
                     console.warn(data.error);
-                    await fetchEvents(); // Zur Sicherheit die echten Daten neu laden
+                    await fetchEvents(); 
                 }
             } catch (error) {
                 console.error("Verbindungsfehler");
@@ -295,28 +344,49 @@
             });
         }
 
+        // NEU: Baut die Liste im Settings-Menü auf
+        function renderSettingsEventList() {
+            const container = document.getElementById('settingsEventsContainer');
+            container.innerHTML = ""; 
+
+            if (events.length === 0) {
+                container.innerHTML = "<p style='color:#777; font-size: 14px;'>Keine Events zum Verwalten vorhanden.</p>";
+                return;
+            }
+
+            events.forEach(event => {
+                const div = document.createElement('div');
+                div.className = 'settings-event-item';
+                div.innerHTML = `
+                    <span style="text-align: left; flex-grow: 1;">${event.name} (🎟️ ${event.tickets})</span>
+                    <button class="btn-delete" onclick="deleteEvent(${event.id})">🗑️</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
         function openCounter(id) {
             activeEventId = id; 
             const currentEvent = events.find(e => e.id === id);
-            document.getElementById('currentEventTitle').innerText = currentEvent.name;
-            updateCounterDisplay();
-            switchView('counterView');
+            if(currentEvent) {
+                document.getElementById('currentEventTitle').innerText = currentEvent.name;
+                updateCounterDisplay();
+                switchView('counterView');
+            }
         }
 
         function updateCounterDisplay() {
             const currentEvent = events.find(e => e.id === activeEventId);
-            if (!currentEvent) return; // Sicherheitscheck, falls Event gelöscht wurde
+            if (!currentEvent) return; 
 
             const displayElement = document.getElementById('ticketCountDisplay');
             displayElement.innerText = currentEvent.tickets;
             displayElement.style.color = currentEvent.tickets === 0 ? "#dc3545" : "#ffffff";
         }
 
-        // --- POLLING (Hintergrund-Aktualisierung) ---
+        // --- POLLING ---
         function startPolling() {
-            // Verhindern, dass mehrere Timer parallel laufen
             if (pollingInterval) clearInterval(pollingInterval);
-            // Alle 3000 Millisekunden (3 Sekunden) die Events neu laden
             pollingInterval = setInterval(fetchEvents, 3000);
         }
 
@@ -328,7 +398,7 @@
         }
 
         // App-Start
-        fetchEvents(); // Holt sofort die aktuellen Daten beim Öffnen
+        fetchEvents();
 
     </script>
 </body>
