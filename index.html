@@ -176,6 +176,7 @@
         let events = []; 
         let activeEventId = null; 
         let pollingInterval = null;
+        let editId = -1; // Speichert, welches Event gerade bearbeitet wird (-1 bedeutet: wir erstellen ein neues)
 
         // --- NAVIGATION ---
         function switchView(viewId) {
@@ -349,20 +350,74 @@
             const container = document.getElementById('settingsEventsContainer');
             container.innerHTML = ""; 
 
-            if (events.length === 0) {
-                container.innerHTML = "<p style='color:#777; font-size: 14px;'>Keine Events zum Verwalten vorhanden.</p>";
-                return;
-            }
-
             events.forEach(event => {
                 const div = document.createElement('div');
                 div.className = 'settings-event-item';
                 div.innerHTML = `
                     <span style="text-align: left; flex-grow: 1;">${event.name} (🎟️ ${event.tickets})</span>
-                    <button class="btn-delete" onclick="deleteEvent(${event.id})">🗑️</button>
+                    <div>
+                        <button class="btn-secondary" style="padding: 10px; width: auto; margin-right: 5px;" onclick="prepareEdit(${event.id})">✏️</button>
+                        <button class="btn-delete" onclick="deleteEvent(${event.id})">🗑️</button>
+                    </div>
                 `;
                 container.appendChild(div);
             });
+        }
+
+        // 1. Bearbeiten-Button geklickt: Daten in die Eingabefelder kopieren
+        function prepareEdit(id) {
+            const event = events.find(e => e.id === id);
+            if (!event) return;
+
+            document.getElementById('eventNameInput').value = event.name;
+            document.getElementById('eventTicketsInput').value = event.tickets;
+            
+            editId = id; // Modus auf "Bearbeiten" setzen
+            
+            // Button-Text anpassen
+            const btn = document.querySelector('#settingsView button.btn-primary');
+            btn.innerText = "Änderungen speichern";
+            btn.style.backgroundColor = "#ffc107"; // Gelb für "Bearbeitungsmodus"
+        }
+
+        // 2. Erstellen/Speichern-Logik erweitern
+        async function addNewEvent() {
+            const name = document.getElementById('eventNameInput').value.trim();
+            const tickets = parseInt(document.getElementById('eventTicketsInput').value);
+
+            if (name === "" || isNaN(tickets) || tickets < 0) {
+                alert("Bitte Felder ausfüllen.");
+                return;
+            }
+
+            // Entscheiden: Update (Bearbeiten) oder Insert (Neu)?
+            const action = (editId === -1) ? 'createEvent' : 'updateEvent';
+            const bodyData = (editId === -1) 
+                ? { action: 'createEvent', name: name, tickets: tickets }
+                : { action: 'updateEvent', id: editId, name: name, tickets: tickets };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bodyData)
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    document.getElementById('eventNameInput').value = "";
+                    document.getElementById('eventTicketsInput').value = "";
+                    
+                    // Modus zurücksetzen
+                    editId = -1;
+                    document.querySelector('#settingsView button.btn-primary').innerText = "Event erstellen & Freischalten";
+                    document.querySelector('#settingsView button.btn-primary').style.backgroundColor = "#007bff";
+                    
+                    await fetchEvents();
+                }
+            } catch (error) {
+                alert("Fehler bei der Übertragung.");
+            }
         }
 
         function openCounter(id) {
